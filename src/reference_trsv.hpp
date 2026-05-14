@@ -21,32 +21,23 @@ std::vector<Compute> make_x_true(std::size_t m, unsigned seed)
     return x;
 }
 
-template <typename Storage, typename Compute>
-std::vector<Compute> upper_matvec(const TiledUpperMatrix<Storage>& u, const std::vector<Compute>& x)
+template <typename Matrix, typename Compute>
+std::vector<Compute> upper_matvec(const Matrix& u, const std::vector<Compute>& x)
 {
     const std::size_t m = u.m();
-    const std::size_t b = u.b();
-    const std::size_t p = u.p();
 
     if (x.size() != m) {
         throw std::invalid_argument("x size must match matrix size m");
     }
 
     std::vector<Compute> y(m, Compute{0});
-
-    for (std::size_t ti = 0; ti < p; ++ti) {
-        for (std::size_t tj = ti; tj < p; ++tj) {
-            const Storage* tile = u.tile(ti, tj);
-            for (std::size_t ii = 0; ii < b; ++ii) {
-                Compute sum = Compute{0};
-                for (std::size_t jj = 0; jj < b; ++jj) {
-                    sum += static_cast<Compute>(tile[ii * b + jj]) * x[tj * b + jj];
-                }
-                y[ti * b + ii] += sum;
-            }
+    for (std::size_t row = 0; row < m; ++row) {
+        Compute sum = Compute{0};
+        for (std::size_t col = row; col < m; ++col) {
+            sum += static_cast<Compute>(u.at(row, col)) * x[col];
         }
+        y[row] = sum;
     }
-
     return y;
 }
 

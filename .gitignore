@@ -1,4 +1,5 @@
 build/
+build-mkl/
 *.o
 *.so
 *.a
