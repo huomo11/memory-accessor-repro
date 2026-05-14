@@ -42,6 +42,9 @@ def main() -> int:
         print(f"error: CSV missing columns: {sorted(missing)}", file=sys.stderr)
         return 1
 
+    df["b"] = pd.to_numeric(df["b"])
+    df["gflops"] = pd.to_numeric(df["gflops"])
+
     plt.style.use("seaborn-v0_8-whitegrid")
     fig, ax = plt.subplots(figsize=(7.6, 5.0))
 
@@ -66,12 +69,7 @@ def main() -> int:
         )
 
     for mode, label, color in BASELINES:
-        sub = df[
-            (df["mode"] == mode)
-            & (df["matrix_layout"] == "contiguous")
-            & (df["data_layout"] == "col_major")
-            & (df["looking"] == "direct")
-        ]
+        sub = df[df["mode"] == mode]
         if sub.empty:
             continue
         ax.axhline(
