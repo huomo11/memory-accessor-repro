@@ -17,5 +17,3 @@ papers/
 *.pem
 *.token
 .env
-
-doc/
