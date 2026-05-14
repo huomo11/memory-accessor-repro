@@ -38,7 +38,7 @@ U x = y
 构建命令：
 
 ```bash
-cmake -S . -B build-mkl -DCMAKE_BUILD_TYPE=Release -DUSE_MKL=ON -DMKL_ROOT=/opt/conda
+cmake -S . -B build-mkl -DCMAKE_BUILD_TYPE=Release -DMKL_ROOT=/opt/conda
 cmake --build build-mkl -j
 ```
 

@@ -12,7 +12,7 @@ mkdir -p results
 
 if [[ ! -x build-mkl/blocked_trsv_benchmark ]]; then
     echo "error: build-mkl/blocked_trsv_benchmark not found or not executable" >&2
-    echo "build first with: cmake -S . -B build-mkl -DCMAKE_BUILD_TYPE=Release -DUSE_MKL=ON -DMKL_ROOT=/opt/conda && cmake --build build-mkl -j" >&2
+    echo "build first with: cmake -S . -B build-mkl -DCMAKE_BUILD_TYPE=Release -DMKL_ROOT=/opt/conda && cmake --build build-mkl -j" >&2
     exit 1
 fi
 

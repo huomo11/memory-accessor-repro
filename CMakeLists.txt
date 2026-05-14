@@ -10,8 +10,34 @@ if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
 endif()
 
-option(USE_MKL "Link against MKL runtime libmkl_rt" OFF)
 set(MKL_ROOT "/opt/conda" CACHE PATH "MKL root directory")
+
+find_package(Threads REQUIRED)
+
+find_path(CBLAS_INCLUDE_DIR
+  NAMES cblas.h
+  PATHS
+    /usr/include
+    /usr/include/x86_64-linux-gnu
+    "${MKL_ROOT}/include"
+)
+
+if(NOT CBLAS_INCLUDE_DIR)
+  message(FATAL_ERROR "Could not find cblas.h. Install a CBLAS development header package or pass a valid include path.")
+endif()
+
+set(MKL_RT_SO "${MKL_ROOT}/lib/libmkl_rt.so")
+set(MKL_RT_SO2 "${MKL_ROOT}/lib/libmkl_rt.so.2")
+
+if(EXISTS "${MKL_RT_SO}")
+  set(MKL_RT_LIBRARY "${MKL_RT_SO}")
+elseif(EXISTS "${MKL_RT_SO2}")
+  set(MKL_RT_LIBRARY "${MKL_RT_SO2}")
+else()
+  message(FATAL_ERROR "Could not find MKL runtime. Expected ${MKL_RT_SO} or ${MKL_RT_SO2}.")
+endif()
+
+message(STATUS "Using MKL runtime: ${MKL_RT_LIBRARY}")
 
 add_executable(blocked_trsv_benchmark
   src/main.cpp
@@ -19,45 +45,20 @@ add_executable(blocked_trsv_benchmark
 
 target_include_directories(blocked_trsv_benchmark PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/src
-  "${MKL_ROOT}/include"
+  ${CBLAS_INCLUDE_DIR}
 )
 
-if(USE_MKL)
-  target_compile_definitions(blocked_trsv_benchmark PRIVATE USE_MKL)
+target_link_libraries(blocked_trsv_benchmark PRIVATE
+  ${MKL_RT_LIBRARY}
+  Threads::Threads
+  m
+  dl
+)
 
-  find_library(MKL_RT_LIBRARY
-    NAMES mkl_rt libmkl_rt.so.2
-    PATHS "${MKL_ROOT}/lib"
-    NO_DEFAULT_PATH
-  )
-
-  if(NOT MKL_RT_LIBRARY AND EXISTS "${MKL_ROOT}/lib/libmkl_rt.so.2")
-    set(MKL_RT_LIBRARY "${MKL_ROOT}/lib/libmkl_rt.so.2")
-  endif()
-
-  if(NOT MKL_RT_LIBRARY)
-    message(FATAL_ERROR "Could not find libmkl_rt under ${MKL_ROOT}/lib. Pass -DMKL_ROOT=/path/to/conda_or_mkl.")
-  endif()
-
-  target_link_directories(blocked_trsv_benchmark PRIVATE
-    "${MKL_ROOT}/lib"
-  )
-
-  target_link_libraries(blocked_trsv_benchmark PRIVATE
-    ${MKL_RT_LIBRARY}
-    pthread
-    m
-    dl
-  )
-
-  set_target_properties(blocked_trsv_benchmark PROPERTIES
-    BUILD_RPATH "${MKL_ROOT}/lib"
-    INSTALL_RPATH "${MKL_ROOT}/lib"
-  )
-else()
-  find_package(BLAS REQUIRED)
-  target_link_libraries(blocked_trsv_benchmark PRIVATE ${BLAS_LIBRARIES})
-endif()
+set_target_properties(blocked_trsv_benchmark PROPERTIES
+  BUILD_RPATH "${MKL_ROOT}/lib"
+  INSTALL_RPATH "${MKL_ROOT}/lib"
+)
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
   target_compile_options(blocked_trsv_benchmark PRIVATE
