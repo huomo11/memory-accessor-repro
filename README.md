@@ -1,128 +1,102 @@
 # memory-accessor-repro
 
-本仓库用于复现论文 “BLAS-based Block Memory Accessor with Applications to Mixed Precision Sparse Direct Solvers” 的 Section 4 / Figure 4.1 风格实验。
+This repository is a minimal reproduction workspace for Section 4 of “BLAS-based Block Memory Accessor with Applications to Mixed Precision Sparse Direct Solvers”.
 
-当前实现 dense upper triangular solve：
+The current main path is the Section 4 tree-parallel benchmark:
 
 ```text
-U x = y
+tiled matrix + column-major tile layout + right-looking blocked triangular solve
 ```
 
-支持 8 种 blocked 配置：
+Each OpenMP thread solves one independent triangular system of order `m=4096`. MKL is kept single-threaded; OpenMP provides the outer tree parallelism.
 
-- `contiguous` / `tiled`
-- `row_major` / `col_major`
-- `left` / `right`
+## Modes
 
-支持三种 blocked mode：
+Blocked modes:
 
-- `fp64`: fp64 storage + fp64 compute
-- `fp32_fp64`: fp32 storage + fp64 compute
-- `fp32`: fp32 storage + fp32 compute
+- `fp64`: double storage, double compute, direct tile pointer, `dtrsv/dgemv`
+- `fp32_fp64`: float storage, double compute, float tile to double workspace, `dtrsv/dgemv`
+- `fp32`: float storage, float compute, direct tile pointer, `strsv/sgemv`
 
-其中 `fp32_fp64` 使用 block memory accessor 逻辑：`float` tile/sub-block 读入后 upcast 到 `double` workspace `B`，再调用 MKL CBLAS `dtrsv` / `dgemv`。
+Direct MKL baselines:
 
-另外加入两个 direct MKL baseline：
+- `direct_fp64_mkl`: full contiguous double upper triangular matrix, one `cblas_dtrsv` per system
+- `direct_fp32_mkl`: full contiguous float upper triangular matrix, one `cblas_strsv` per system
 
-- `direct_fp64_mkl`: full contiguous double matrix + one `cblas_dtrsv`
-- `direct_fp32_mkl`: full contiguous float matrix + one `cblas_strsv`
+## Build
 
-## 远程 MKL 构建
-
-默认目标环境是远程算力平台，MKL 位于：
+The remote target links MKL runtime directly from:
 
 ```text
 /opt/conda/lib/libmkl_rt.so.2
 ```
 
-构建命令：
+Build:
 
 ```bash
 cmake -S . -B build-mkl -DCMAKE_BUILD_TYPE=Release -DMKL_ROOT=/opt/conda
 cmake --build build-mkl -j
 ```
 
-生成可执行文件：
-
-```text
-build-mkl/blocked_trsv_benchmark
-```
-
-## 运行 benchmark
+## Run
 
 ```bash
-bash scripts/run_ch4_minimal.sh
+bash scripts/run_ch4_tree_parallel.sh
 ```
 
-脚本设置：
+The script sets:
 
 ```bash
 export MKL_NUM_THREADS=1
-export OMP_NUM_THREADS=1
+export OMP_NUM_THREADS=20   # only if not already set
 export MKL_DYNAMIC=FALSE
 ```
 
-输出 CSV：
+Output:
 
 ```text
-results/ch4_minimal.csv
+results/ch4_tree_parallel.csv
 ```
 
-CSV 格式：
+CSV fields:
 
 ```text
-mode,matrix_layout,data_layout,looking,m,b,repeat,time_ms,gflops,rel_error
+mode,matrix_layout,data_layout,looking,m,b,repeat,num_systems,num_threads,time_ms,gflops,max_rel_error
 ```
 
-## 画图
+## Plot
 
 ```bash
-python3 scripts/plot_ch4_minimal.py
+python3 scripts/plot_ch4_tree_parallel.py
 ```
 
-输出：
+Output:
 
 ```text
-results/ch4_figure4_1_style.png
+results/ch4_tree_parallel_colmajor_right.png
 ```
 
-图像为 2 行 x 4 列，风格对应 Figure 4.1：
-
-- 第一行：contiguous array
-- 第二行：tiled matrix
-- 四列：Column-major/Left-looking、Column-major/Right-looking、Row-major/Left-looking、Row-major/Right-looking
-
-每个子图包含 `fp64`、`fp32+fp64`、`fp32` 三条 blocked 曲线，以及 `fp64 (MKL)`、`fp32 (MKL)` 两条 direct baseline 虚线。
-
-## 性能诊断
-
-默认 benchmark 不开启逐块计时。需要分析 mixed mode 时间分布时运行：
-
-```bash
-build-mkl/blocked_trsv_benchmark --breakdown
-```
-
-输出：
+The figure is a single plot for:
 
 ```text
-results/ch4_breakdown.csv
+Tree parallel / Tiled matrix / Column-major / Right-looking
 ```
 
-字段：
+It shows the three blocked precision modes as solid curves and the two direct MKL baselines as horizontal dashed lines.
 
-```text
-mode,matrix_layout,data_layout,looking,m,b,repeat,total_ms,prepare_ms,trsv_ms,gemv_ms,rel_error
-```
+## Legacy Paths
 
-## 当前限制
+The older single-thread 8-panel Figure 4.1 style path and the breakdown diagnostic code are still present for reference, but they are no longer the default workflow. The default scripts now run the tree-parallel benchmark.
 
-当前不包含：
+Current non-goals:
 
 - custom precision
 - AVX512-VBMI
 - BLR
 - MUMPS
-- OpenMP tree parallelism
 - MPI
-
-`m % b != 0` 的 block size 会被跳过；如果通过 `--b` 显式指定非法 block size，则程序会报错。当前目标是复现 Section 4 / Figure 4.1 的核心 benchmark 结构，不追求论文绝对性能数值。
+- non-divisible blocks
+- left-looking
+- row-major
+- contiguous blocked variants
+- 8-panel figure generation as the main output

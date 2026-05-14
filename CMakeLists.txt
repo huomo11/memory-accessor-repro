@@ -13,6 +13,7 @@ endif()
 set(MKL_ROOT "/opt/conda" CACHE PATH "MKL root directory")
 
 find_package(Threads REQUIRED)
+find_package(OpenMP REQUIRED)
 
 find_path(CBLAS_INCLUDE_DIR
   NAMES cblas.h
@@ -51,6 +52,7 @@ target_include_directories(blocked_trsv_benchmark PRIVATE
 target_link_libraries(blocked_trsv_benchmark PRIVATE
   ${MKL_RT_LIBRARY}
   Threads::Threads
+  OpenMP::OpenMP_CXX
   m
   dl
 )

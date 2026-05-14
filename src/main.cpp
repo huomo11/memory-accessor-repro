@@ -2,6 +2,9 @@
 #include "reference_trsv.hpp"
 #include "tiled_matrix.hpp"
 
+#include <omp.h>
+
+#include <algorithm>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
@@ -21,6 +24,7 @@ struct Options {
     std::vector<std::size_t> blocks = {16, 32, 64, 96, 128, 160, 192, 224, 256, 320, 384, 512};
     bool explicit_block_list = false;
     bool breakdown = false;
+    bool tree_parallel = false;
 };
 
 std::size_t parse_size(const std::string& text, const std::string& name)
@@ -93,9 +97,12 @@ Options parse_options(int argc, char** argv)
             opt.explicit_block_list = true;
         } else if (arg == "--breakdown") {
             opt.breakdown = true;
+        } else if (arg == "--tree-parallel") {
+            opt.tree_parallel = true;
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: blocked_trsv_benchmark [--m 4096] [--repeat 5] "
-                         "[--b 16,32,64] [--output results/ch4_minimal.csv] [--breakdown]\n";
+            std::cout << "Usage: blocked_trsv_benchmark --tree-parallel\n"
+                         "Legacy options: [--m 4096] [--repeat 5] [--b 16,32,64] "
+                         "[--output results/ch4_minimal.csv] [--breakdown]\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + arg);
@@ -151,6 +158,33 @@ void write_breakdown_row(std::ofstream& csv,
         << std::setprecision(10) << stats.trsv_ms << ','
         << std::setprecision(10) << stats.gemv_ms << ','
         << std::setprecision(10) << rel_error << '\n';
+}
+
+void write_tree_row(std::ofstream& csv,
+                    const std::string& mode,
+                    MatrixLayout matrix_layout,
+                    const std::string& looking,
+                    std::size_t m,
+                    std::size_t b,
+                    int repeat,
+                    int num_systems,
+                    int num_threads,
+                    double time_ms,
+                    double gflops,
+                    double max_rel_error)
+{
+    csv << mode << ','
+        << to_string(matrix_layout) << ','
+        << to_string(DataLayout::ColMajor) << ','
+        << looking << ','
+        << m << ','
+        << b << ','
+        << repeat << ','
+        << num_systems << ','
+        << num_threads << ','
+        << std::setprecision(10) << time_ms << ','
+        << std::setprecision(10) << gflops << ','
+        << std::setprecision(10) << max_rel_error << '\n';
 }
 
 template <typename Matrix, typename Compute>
@@ -347,6 +381,181 @@ void run_breakdown(std::size_t m)
     }
 }
 
+template <typename Storage, typename Compute>
+struct TiledTreeSystem {
+    TiledUpperMatrix<Storage> u;
+    std::vector<Compute> x_true;
+    std::vector<Compute> y;
+    std::vector<Compute> x;
+
+    TiledTreeSystem(std::size_t m, std::size_t b, int system_id)
+        : u(m, b, DataLayout::ColMajor),
+          x_true(make_x_true<Compute>(m, static_cast<unsigned>(67890 + system_id)))
+    {
+        u.fill_stable_upper(static_cast<unsigned>(12345 + system_id));
+        y = upper_matvec<TiledUpperMatrix<Storage>, Compute>(u, x_true);
+        x = y;
+    }
+};
+
+template <typename Compute>
+struct DirectTreeSystem {
+    ContiguousUpperMatrix<Compute> u;
+    std::vector<Compute> x_true;
+    std::vector<Compute> y;
+    std::vector<Compute> x;
+
+    DirectTreeSystem(std::size_t m, int system_id)
+        : u(m, m, DataLayout::ColMajor),
+          x_true(make_x_true<Compute>(m, static_cast<unsigned>(67890 + system_id)))
+    {
+        u.fill_stable_upper(static_cast<unsigned>(12345 + system_id));
+        y = upper_matvec<ContiguousUpperMatrix<Compute>, Compute>(u, x_true);
+        x = y;
+    }
+};
+
+template <typename Storage, typename Compute>
+void run_tree_blocked_mode(const std::string& mode,
+                           std::size_t m,
+                           std::size_t b,
+                           int repeat,
+                           int num_systems,
+                           std::ofstream& csv)
+{
+    std::vector<TiledTreeSystem<Storage, Compute>> systems;
+    systems.reserve(static_cast<std::size_t>(num_systems));
+    for (int system_id = 0; system_id < num_systems; ++system_id) {
+        systems.emplace_back(m, b, system_id);
+    }
+
+    const double flops = static_cast<double>(num_systems) * static_cast<double>(m) * static_cast<double>(m);
+
+    for (int r = 0; r < repeat; ++r) {
+        for (auto& system : systems) {
+            system.x = system.y;
+        }
+
+        int num_threads = 0;
+        const auto start = std::chrono::steady_clock::now();
+
+#pragma omp parallel
+        {
+#pragma omp single
+            num_threads = omp_get_num_threads();
+
+#pragma omp for schedule(static)
+            for (int system_id = 0; system_id < num_systems; ++system_id) {
+                blocked_trsv_right_looking<TiledUpperMatrix<Storage>, Compute>(
+                    systems[static_cast<std::size_t>(system_id)].u,
+                    systems[static_cast<std::size_t>(system_id)].x);
+            }
+        }
+
+        const auto stop = std::chrono::steady_clock::now();
+        const std::chrono::duration<double> elapsed = stop - start;
+        const double seconds = elapsed.count();
+        const double time_ms = seconds * 1000.0;
+        const double gflops = flops / seconds / 1.0e9;
+
+        double max_rel_error = 0.0;
+        for (const auto& system : systems) {
+            max_rel_error = std::max(max_rel_error, relative_error(system.x, system.x_true));
+        }
+
+        write_tree_row(csv, mode, MatrixLayout::Tiled, "right", m, b, r,
+                       num_systems, num_threads, time_ms, gflops, max_rel_error);
+    }
+}
+
+template <typename Compute>
+void run_tree_direct_mode(const std::string& mode,
+                          std::size_t m,
+                          std::size_t b,
+                          int repeat,
+                          int num_systems,
+                          std::ofstream& csv)
+{
+    std::vector<DirectTreeSystem<Compute>> systems;
+    systems.reserve(static_cast<std::size_t>(num_systems));
+    for (int system_id = 0; system_id < num_systems; ++system_id) {
+        systems.emplace_back(m, system_id);
+    }
+
+    const double flops = static_cast<double>(num_systems) * static_cast<double>(m) * static_cast<double>(m);
+
+    for (int r = 0; r < repeat; ++r) {
+        for (auto& system : systems) {
+            system.x = system.y;
+        }
+
+        int num_threads = 0;
+        const auto start = std::chrono::steady_clock::now();
+
+#pragma omp parallel
+        {
+#pragma omp single
+            num_threads = omp_get_num_threads();
+
+#pragma omp for schedule(static)
+            for (int system_id = 0; system_id < num_systems; ++system_id) {
+                direct_trsv<Compute>(
+                    systems[static_cast<std::size_t>(system_id)].u,
+                    systems[static_cast<std::size_t>(system_id)].x);
+            }
+        }
+
+        const auto stop = std::chrono::steady_clock::now();
+        const std::chrono::duration<double> elapsed = stop - start;
+        const double seconds = elapsed.count();
+        const double time_ms = seconds * 1000.0;
+        const double gflops = flops / seconds / 1.0e9;
+
+        double max_rel_error = 0.0;
+        for (const auto& system : systems) {
+            max_rel_error = std::max(max_rel_error, relative_error(system.x, system.x_true));
+        }
+
+        write_tree_row(csv, mode, MatrixLayout::Contiguous, "direct", m, b, r,
+                       num_systems, num_threads, time_ms, gflops, max_rel_error);
+    }
+}
+
+void run_tree_parallel(std::size_t m)
+{
+    const std::vector<std::size_t> blocks = {16, 32, 64, 128, 256, 512};
+    constexpr int repeat = 5;
+    const int num_systems = omp_get_max_threads();
+
+    std::ofstream csv("results/ch4_tree_parallel.csv");
+    if (!csv) {
+        throw std::runtime_error("failed to open output CSV: results/ch4_tree_parallel.csv");
+    }
+
+    csv << "mode,matrix_layout,data_layout,looking,m,b,repeat,num_systems,num_threads,time_ms,gflops,max_rel_error\n";
+
+    for (const std::size_t b : blocks) {
+        if (m % b != 0) {
+            throw std::invalid_argument("tree-parallel benchmark requires m % b == 0");
+        }
+
+        std::cerr << "tree-parallel b=" << b << " mode=fp64\n";
+        run_tree_blocked_mode<double, double>("fp64", m, b, repeat, num_systems, csv);
+
+        std::cerr << "tree-parallel b=" << b << " mode=fp32_fp64\n";
+        run_tree_blocked_mode<float, double>("fp32_fp64", m, b, repeat, num_systems, csv);
+
+        std::cerr << "tree-parallel b=" << b << " mode=fp32\n";
+        run_tree_blocked_mode<float, float>("fp32", m, b, repeat, num_systems, csv);
+
+        std::cerr << "tree-parallel b=" << b << " mode=direct_fp64_mkl\n";
+        run_tree_direct_mode<double>("direct_fp64_mkl", m, b, repeat, num_systems, csv);
+
+        std::cerr << "tree-parallel b=" << b << " mode=direct_fp32_mkl\n";
+        run_tree_direct_mode<float>("direct_fp32_mkl", m, b, repeat, num_systems, csv);
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -356,6 +565,11 @@ int main(int argc, char** argv)
 
         if (opt.breakdown) {
             run_breakdown(opt.m);
+            return 0;
+        }
+
+        if (opt.tree_parallel) {
+            run_tree_parallel(opt.m);
             return 0;
         }
 
