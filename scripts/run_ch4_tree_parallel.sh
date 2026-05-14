@@ -5,7 +5,9 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
 export MKL_NUM_THREADS=1
-: "${OMP_NUM_THREADS:=20}"
+if [[ -z "${OMP_NUM_THREADS:-}" ]]; then
+    OMP_NUM_THREADS="$(nproc)"
+fi
 export OMP_NUM_THREADS
 export MKL_DYNAMIC=FALSE
 

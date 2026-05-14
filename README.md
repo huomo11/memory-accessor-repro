@@ -48,9 +48,13 @@ The script sets:
 
 ```bash
 export MKL_NUM_THREADS=1
-export OMP_NUM_THREADS=20   # only if not already set
+export OMP_NUM_THREADS=$(nproc)   # only if not already set
 export MKL_DYNAMIC=FALSE
 ```
+
+The tree-parallel benchmark uses the CPU count actually allocated to the current job or shell. If `OMP_NUM_THREADS` is not set, the run script uses `nproc`; if `OMP_NUM_THREADS` is already set, the script respects it. The C++ benchmark sets `num_systems = omp_get_max_threads()`, so the number of independent triangular systems follows `OMP_NUM_THREADS`.
+
+To run a 20-core experiment, first request 20 CPUs from the scheduler, then set or inherit `OMP_NUM_THREADS=20`. Do not force `OMP_NUM_THREADS=20` inside a 4-core interactive shell; that oversubscribes the allocated CPUs and also increases the number of systems to 20.
 
 Output:
 
