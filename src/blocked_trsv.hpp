@@ -2,7 +2,11 @@
 
 #include "tiled_matrix.hpp"
 
+#if defined(USE_MKL) && __has_include(<mkl_cblas.h>)
 #include <mkl_cblas.h>
+#else
+#include <cblas.h>
+#endif
 
 #include <cstddef>
 #include <stdexcept>
