@@ -49,43 +49,95 @@ struct Blas<double> {
     }
 };
 
-template <typename Matrix, typename Compute>
-void copy_block_as_compute(const Matrix& u, std::size_t tile_i, std::size_t tile_j, Compute* dst)
+template <typename Compute>
+struct BlasOperand {
+    const Compute* data;
+    std::size_t lda;
+};
+
+template <typename Storage, typename Compute>
+void copy_compact_block_as_compute(const Storage* src, Compute* dst, std::size_t b, DataLayout layout)
 {
-    const std::size_t b = u.b();
-    const DataLayout layout = u.data_layout();
-    for (std::size_t row = 0; row < b; ++row) {
+    if (layout == DataLayout::RowMajor) {
+        for (std::size_t row = 0; row < b; ++row) {
+            for (std::size_t col = 0; col < b; ++col) {
+                const std::size_t k = row * b + col;
+                dst[k] = static_cast<Compute>(src[k]);
+            }
+        }
+    } else {
         for (std::size_t col = 0; col < b; ++col) {
-            dst[dense_index(row, col, b, layout)] = static_cast<Compute>(u.block_value(tile_i, tile_j, row, col));
+            for (std::size_t row = 0; row < b; ++row) {
+                const std::size_t k = col * b + row;
+                dst[k] = static_cast<Compute>(src[k]);
+            }
         }
     }
 }
 
 template <typename Storage, typename Compute>
-const Compute* prepare_block_for_blas(const TiledUpperMatrix<Storage>& u,
-                                      std::size_t tile_i,
-                                      std::size_t tile_j,
-                                      std::vector<Compute>& workspace)
+void copy_contiguous_block_as_compute(const Storage* src,
+                                      Compute* dst,
+                                      std::size_t m,
+                                      std::size_t b,
+                                      std::size_t row0,
+                                      std::size_t col0,
+                                      DataLayout layout)
 {
-    if constexpr (std::is_same_v<Storage, Compute>) {
-        // Uniform precision tiled blocks are already compact b x b BLAS operands.
-        return u.tile(tile_i, tile_j);
+    if (layout == DataLayout::RowMajor) {
+        for (std::size_t row = 0; row < b; ++row) {
+            const Storage* src_row = src + (row0 + row) * m + col0;
+            Compute* dst_row = dst + row * b;
+            for (std::size_t col = 0; col < b; ++col) {
+                dst_row[col] = static_cast<Compute>(src_row[col]);
+            }
+        }
     } else {
-        // Mixed precision block memory accessor: storage tile -> compute workspace.
-        copy_block_as_compute(u, tile_i, tile_j, workspace.data());
-        return workspace.data();
+        for (std::size_t col = 0; col < b; ++col) {
+            const Storage* src_col = src + (col0 + col) * m + row0;
+            Compute* dst_col = dst + col * b;
+            for (std::size_t row = 0; row < b; ++row) {
+                dst_col[row] = static_cast<Compute>(src_col[row]);
+            }
+        }
     }
 }
 
 template <typename Storage, typename Compute>
-const Compute* prepare_block_for_blas(const ContiguousUpperMatrix<Storage>& u,
-                                      std::size_t tile_i,
-                                      std::size_t tile_j,
-                                      std::vector<Compute>& workspace)
+BlasOperand<Compute> prepare_block_for_blas(const TiledUpperMatrix<Storage>& u,
+                                            std::size_t tile_i,
+                                            std::size_t tile_j,
+                                            std::vector<Compute>& workspace)
 {
-    // A b x b sub-block of a full matrix is strided, so keep the compact workspace path.
-    copy_block_as_compute(u, tile_i, tile_j, workspace.data());
-    return workspace.data();
+    const std::size_t b = u.b();
+    if constexpr (std::is_same_v<Storage, Compute>) {
+        // Uniform precision tiled blocks are already compact b x b BLAS operands.
+        return {u.tile(tile_i, tile_j), b};
+    } else {
+        // Mixed precision block memory accessor: storage tile -> compute workspace.
+        copy_compact_block_as_compute(u.tile(tile_i, tile_j), workspace.data(), b, u.data_layout());
+        return {workspace.data(), b};
+    }
+}
+
+template <typename Storage, typename Compute>
+BlasOperand<Compute> prepare_block_for_blas(const ContiguousUpperMatrix<Storage>& u,
+                                            std::size_t tile_i,
+                                            std::size_t tile_j,
+                                            std::vector<Compute>& workspace)
+{
+    const std::size_t m = u.m();
+    const std::size_t b = u.b();
+    const std::size_t row0 = tile_i * b;
+    const std::size_t col0 = tile_j * b;
+
+    if constexpr (std::is_same_v<Storage, Compute>) {
+        const std::size_t offset = dense_index(row0, col0, m, u.data_layout());
+        return {u.data() + offset, m};
+    } else {
+        copy_contiguous_block_as_compute(u.data(), workspace.data(), m, b, row0, col0, u.data_layout());
+        return {workspace.data(), b};
+    }
 }
 
 template <typename Matrix, typename Compute>
@@ -103,12 +155,12 @@ void blocked_trsv_right_looking(const Matrix& u, std::vector<Compute>& x)
     const CBLAS_LAYOUT layout = cblas_layout(u.data_layout());
 
     for (std::size_t j = p; j-- > 0;) {
-        const Compute* diag = prepare_block_for_blas(u, j, j, workspace);
-        Blas<Compute>::trsv(layout, b, diag, b, x.data() + j * b);
+        const BlasOperand<Compute> diag = prepare_block_for_blas(u, j, j, workspace);
+        Blas<Compute>::trsv(layout, b, diag.data, diag.lda, x.data() + j * b);
 
         for (std::size_t i = j; i-- > 0;) {
-            const Compute* block = prepare_block_for_blas(u, i, j, workspace);
-            Blas<Compute>::gemv(layout, b, block, b, x.data() + j * b, x.data() + i * b);
+            const BlasOperand<Compute> block = prepare_block_for_blas(u, i, j, workspace);
+            Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
         }
     }
 }
@@ -129,12 +181,12 @@ void blocked_trsv_left_looking(const Matrix& u, std::vector<Compute>& x)
 
     for (std::size_t i = p; i-- > 0;) {
         for (std::size_t j = p; j-- > i + 1;) {
-            const Compute* block = prepare_block_for_blas(u, i, j, workspace);
-            Blas<Compute>::gemv(layout, b, block, b, x.data() + j * b, x.data() + i * b);
+            const BlasOperand<Compute> block = prepare_block_for_blas(u, i, j, workspace);
+            Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
         }
 
-        const Compute* diag = prepare_block_for_blas(u, i, i, workspace);
-        Blas<Compute>::trsv(layout, b, diag, b, x.data() + i * b);
+        const BlasOperand<Compute> diag = prepare_block_for_blas(u, i, i, workspace);
+        Blas<Compute>::trsv(layout, b, diag.data, diag.lda, x.data() + i * b);
     }
 }
 

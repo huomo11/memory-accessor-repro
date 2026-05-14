@@ -101,12 +101,16 @@ def main() -> int:
                 )
 
             for mode, label, color in BASELINES:
-                sub = panel[(panel["mode"] == mode) & (panel["looking"] == "direct")]
+                sub = df[
+                    (df["matrix_layout"] == matrix_layout)
+                    & (df["data_layout"] == data_layout)
+                    & (df["mode"] == mode)
+                    & (df["looking"] == "direct")
+                ]
                 if sub.empty:
                     continue
-                ax.plot(
-                    sub["b"],
-                    sub["gflops"],
+                ax.axhline(
+                    sub["gflops"].median(),
                     linewidth=1.5,
                     color=color,
                     linestyle="--",
