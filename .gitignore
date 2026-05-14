@@ -1,0 +1,23 @@
+build/
+*.o
+*.so
+*.a
+*.out
+*.exe
+__pycache__/
+*.pyc
+.vscode-server/
+.DS_Store
+
+# large or temporary results
+results/*.csv
+results/*.png
+results/*.pdf
+
+# do not commit papers or private files
+papers/
+*.pdf
+*.key
+*.pem
+*.token
+.env
