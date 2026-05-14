@@ -8,9 +8,8 @@ __pycache__/
 *.pyc
 .DS_Store
 
-results/*.csv
-results/*.png
-results/*.pdf
+results/*
+!results/.gitkeep
 
 papers/
 *.pdf
@@ -18,3 +17,5 @@ papers/
 *.pem
 *.token
 .env
+
+doc/
