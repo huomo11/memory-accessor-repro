@@ -4,6 +4,7 @@
 
 #include <cblas.h>
 
+#include <chrono>
 #include <cstddef>
 #include <stdexcept>
 #include <type_traits>
@@ -51,8 +52,15 @@ struct Blas<double> {
 
 template <typename Compute>
 struct BlasOperand {
-    const Compute* data;
-    std::size_t lda;
+    const Compute* data = nullptr;
+    std::size_t lda = 0;
+};
+
+struct BreakdownStats {
+    double total_ms = 0.0;
+    double prepare_ms = 0.0;
+    double trsv_ms = 0.0;
+    double gemv_ms = 0.0;
 };
 
 template <typename Storage, typename Compute>
@@ -163,6 +171,56 @@ void blocked_trsv_right_looking(const Matrix& u, std::vector<Compute>& x)
             Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
         }
     }
+}
+
+template <typename Matrix, typename Compute>
+BreakdownStats blocked_trsv_right_looking_breakdown(const Matrix& u, std::vector<Compute>& x)
+{
+    const std::size_t m = u.m();
+    const std::size_t b = u.b();
+    const std::size_t p = u.p();
+
+    if (x.size() != m) {
+        throw std::invalid_argument("x size must match matrix size m");
+    }
+
+    auto elapsed_ms = [](const auto& start, const auto& stop) {
+        return std::chrono::duration<double, std::milli>(stop - start).count();
+    };
+
+    BreakdownStats stats;
+    std::vector<Compute> workspace(b * b);
+    const CBLAS_LAYOUT layout = cblas_layout(u.data_layout());
+
+    const auto total_start = std::chrono::steady_clock::now();
+
+    for (std::size_t j = p; j-- > 0;) {
+        const auto prepare_start = std::chrono::steady_clock::now();
+        const BlasOperand<Compute> diag = prepare_block_for_blas(u, j, j, workspace);
+        const auto prepare_stop = std::chrono::steady_clock::now();
+        stats.prepare_ms += elapsed_ms(prepare_start, prepare_stop);
+
+        const auto trsv_start = std::chrono::steady_clock::now();
+        Blas<Compute>::trsv(layout, b, diag.data, diag.lda, x.data() + j * b);
+        const auto trsv_stop = std::chrono::steady_clock::now();
+        stats.trsv_ms += elapsed_ms(trsv_start, trsv_stop);
+
+        for (std::size_t i = j; i-- > 0;) {
+            const auto block_prepare_start = std::chrono::steady_clock::now();
+            const BlasOperand<Compute> block = prepare_block_for_blas(u, i, j, workspace);
+            const auto block_prepare_stop = std::chrono::steady_clock::now();
+            stats.prepare_ms += elapsed_ms(block_prepare_start, block_prepare_stop);
+
+            const auto gemv_start = std::chrono::steady_clock::now();
+            Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
+            const auto gemv_stop = std::chrono::steady_clock::now();
+            stats.gemv_ms += elapsed_ms(gemv_start, gemv_stop);
+        }
+    }
+
+    const auto total_stop = std::chrono::steady_clock::now();
+    stats.total_ms = elapsed_ms(total_start, total_stop);
+    return stats;
 }
 
 template <typename Matrix, typename Compute>

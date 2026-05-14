@@ -94,6 +94,26 @@ results/ch4_figure4_1_style.png
 
 每个子图包含 `fp64`、`fp32+fp64`、`fp32` 三条 blocked 曲线，以及 `fp64 (MKL)`、`fp32 (MKL)` 两条 direct baseline 虚线。
 
+## 性能诊断
+
+默认 benchmark 不开启逐块计时。需要分析 mixed mode 时间分布时运行：
+
+```bash
+build-mkl/blocked_trsv_benchmark --breakdown
+```
+
+输出：
+
+```text
+results/ch4_breakdown.csv
+```
+
+字段：
+
+```text
+mode,matrix_layout,data_layout,looking,m,b,repeat,total_ms,prepare_ms,trsv_ms,gemv_ms,rel_error
+```
+
 ## 当前限制
 
 当前不包含：

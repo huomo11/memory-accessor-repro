@@ -20,6 +20,7 @@ struct Options {
     std::string output = "results/ch4_minimal.csv";
     std::vector<std::size_t> blocks = {16, 32, 64, 96, 128, 160, 192, 224, 256, 320, 384, 512};
     bool explicit_block_list = false;
+    bool breakdown = false;
 };
 
 std::size_t parse_size(const std::string& text, const std::string& name)
@@ -90,9 +91,11 @@ Options parse_options(int argc, char** argv)
         } else if (arg == "--b") {
             opt.blocks = parse_blocks(require_value(arg));
             opt.explicit_block_list = true;
+        } else if (arg == "--breakdown") {
+            opt.breakdown = true;
         } else if (arg == "--help" || arg == "-h") {
             std::cout << "Usage: blocked_trsv_benchmark [--m 4096] [--repeat 5] "
-                         "[--b 16,32,64] [--output results/ch4_minimal.csv]\n";
+                         "[--b 16,32,64] [--output results/ch4_minimal.csv] [--breakdown]\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + arg);
@@ -122,6 +125,31 @@ void write_row(std::ofstream& csv,
         << repeat << ','
         << std::setprecision(10) << time_ms << ','
         << std::setprecision(10) << gflops << ','
+        << std::setprecision(10) << rel_error << '\n';
+}
+
+void write_breakdown_row(std::ofstream& csv,
+                         const std::string& mode,
+                         MatrixLayout matrix_layout,
+                         DataLayout data_layout,
+                         Looking looking,
+                         std::size_t m,
+                         std::size_t b,
+                         int repeat,
+                         const BreakdownStats& stats,
+                         double rel_error)
+{
+    csv << mode << ','
+        << to_string(matrix_layout) << ','
+        << to_string(data_layout) << ','
+        << to_string(looking) << ','
+        << m << ','
+        << b << ','
+        << repeat << ','
+        << std::setprecision(10) << stats.total_ms << ','
+        << std::setprecision(10) << stats.prepare_ms << ','
+        << std::setprecision(10) << stats.trsv_ms << ','
+        << std::setprecision(10) << stats.gemv_ms << ','
         << std::setprecision(10) << rel_error << '\n';
 }
 
@@ -250,12 +278,86 @@ void run_all_for_block(std::size_t m, std::size_t b, int repeat, std::ofstream& 
     }
 }
 
+template <typename Storage, typename Compute>
+void run_breakdown_mode(const std::string& mode,
+                        DataLayout data_layout,
+                        std::size_t m,
+                        std::size_t b,
+                        int repeat,
+                        std::ofstream& csv)
+{
+    TiledUpperMatrix<Storage> u(m, b, data_layout);
+    u.fill_stable_upper(12345);
+
+    const std::vector<Compute> x_true = make_x_true<Compute>(m, 67890);
+    const std::vector<Compute> y = upper_matvec<TiledUpperMatrix<Storage>, Compute>(u, x_true);
+
+    for (int r = 0; r < repeat; ++r) {
+        std::vector<Compute> x = y;
+        const BreakdownStats stats = blocked_trsv_right_looking_breakdown<TiledUpperMatrix<Storage>, Compute>(u, x);
+        const double rel_error = relative_error(x, x_true);
+
+        write_breakdown_row(csv, mode, MatrixLayout::Tiled, data_layout, Looking::Right,
+                            m, b, r, stats, rel_error);
+    }
+}
+
+void run_breakdown(std::size_t m)
+{
+    const std::vector<std::size_t> blocks = {32, 64, 128, 256, 512};
+    const std::vector<DataLayout> data_layouts = {DataLayout::RowMajor, DataLayout::ColMajor};
+    constexpr int repeat = 3;
+
+    std::ofstream csv("results/ch4_breakdown.csv");
+    if (!csv) {
+        throw std::runtime_error("failed to open output CSV: results/ch4_breakdown.csv");
+    }
+
+    csv << "mode,matrix_layout,data_layout,looking,m,b,repeat,total_ms,prepare_ms,trsv_ms,gemv_ms,rel_error\n";
+
+    for (const std::size_t b : blocks) {
+        if (m % b != 0) {
+            std::cerr << "warning: skipping breakdown block size because m=" << m
+                      << " is not divisible by b=" << b << '\n';
+            continue;
+        }
+
+        for (const DataLayout data_layout : data_layouts) {
+            std::cerr << "breakdown b=" << b
+                      << " matrix_layout=tiled"
+                      << " data_layout=" << to_string(data_layout)
+                      << " looking=right"
+                      << " mode=fp64\n";
+            run_breakdown_mode<double, double>("fp64", data_layout, m, b, repeat, csv);
+
+            std::cerr << "breakdown b=" << b
+                      << " matrix_layout=tiled"
+                      << " data_layout=" << to_string(data_layout)
+                      << " looking=right"
+                      << " mode=fp32_fp64\n";
+            run_breakdown_mode<float, double>("fp32_fp64", data_layout, m, b, repeat, csv);
+
+            std::cerr << "breakdown b=" << b
+                      << " matrix_layout=tiled"
+                      << " data_layout=" << to_string(data_layout)
+                      << " looking=right"
+                      << " mode=fp32\n";
+            run_breakdown_mode<float, float>("fp32", data_layout, m, b, repeat, csv);
+        }
+    }
+}
+
 } // namespace
 
 int main(int argc, char** argv)
 {
     try {
         const Options opt = parse_options(argc, argv);
+
+        if (opt.breakdown) {
+            run_breakdown(opt.m);
+            return 0;
+        }
 
         std::ofstream csv(opt.output);
         if (!csv) {
