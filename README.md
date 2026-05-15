@@ -44,6 +44,18 @@ cmake --build build-mkl -j
 bash scripts/run_ch4_tree_parallel.sh
 ```
 
+Equivalent explicit command:
+
+```bash
+build-mkl/blocked_trsv_benchmark \
+  --tree-parallel \
+  --m 4096 \
+  --b 16,32,64,128,256,512 \
+  --repeat 10 \
+  --warmup 2 \
+  --output results/ch4_tree_parallel.csv
+```
+
 The script sets:
 
 ```bash
@@ -57,6 +69,16 @@ The tree-parallel benchmark uses the CPU count actually allocated to the current
 To run a 20-core experiment, first request 20 CPUs from the scheduler, then set or inherit `OMP_NUM_THREADS=20`. Do not force `OMP_NUM_THREADS=20` inside a 4-core interactive shell; that oversubscribes the allocated CPUs and also increases the number of systems to 20.
 
 For each `mode,b` pair, the benchmark runs warmup solves before recording timed repeats. Warmup rows are not written to the CSV; they are only there to reduce outliers from first BLAS calls, OpenMP/MKL runtime initialization, cache effects, and page faults. The recorded `repeat` column counts formal timed repeats only.
+
+The current main result is the 20-core single-socket bind result. For production runs, prefer binding close to cores, for example:
+
+```bash
+export OMP_PLACES=cores
+export OMP_PROC_BIND=close
+export MKL_NUM_THREADS=1
+```
+
+For direct MKL baselines, `b` is only kept as a plotting/grouping label; the direct full contiguous triangular solve itself does not use the block size.
 
 Output:
 
@@ -92,7 +114,12 @@ It shows the three blocked precision modes as solid curves and the two direct MK
 
 ## Legacy Paths
 
-The older single-thread 8-panel Figure 4.1 style path and the breakdown diagnostic code are still present for reference, but they are no longer the default workflow. The default scripts now run the tree-parallel benchmark.
+The maintained path is the Chapter 4 tree-parallel benchmark. Older single-thread 8-panel and diagnostic harness code has been removed from the active source; it can be recovered from Git history if needed. The recommended entry points are:
+
+```bash
+bash scripts/run_ch4_tree_parallel.sh
+python3 scripts/plot_ch4_tree_parallel.py
+```
 
 Current non-goals:
 

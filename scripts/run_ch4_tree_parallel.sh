@@ -21,6 +21,12 @@ if [[ ! -x build-mkl/blocked_trsv_benchmark ]]; then
     exit 1
 fi
 
-build-mkl/blocked_trsv_benchmark --tree-parallel
+build-mkl/blocked_trsv_benchmark \
+    --tree-parallel \
+    --m 4096 \
+    --b 16,32,64,128,256,512 \
+    --repeat 10 \
+    --warmup 2 \
+    --output results/ch4_tree_parallel.csv
 
 echo "wrote results/ch4_tree_parallel.csv"
