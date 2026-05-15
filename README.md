@@ -56,6 +56,8 @@ The tree-parallel benchmark uses the CPU count actually allocated to the current
 
 To run a 20-core experiment, first request 20 CPUs from the scheduler, then set or inherit `OMP_NUM_THREADS=20`. Do not force `OMP_NUM_THREADS=20` inside a 4-core interactive shell; that oversubscribes the allocated CPUs and also increases the number of systems to 20.
 
+For each `mode,b` pair, the benchmark runs warmup solves before recording timed repeats. Warmup rows are not written to the CSV; they are only there to reduce outliers from first BLAS calls, OpenMP/MKL runtime initialization, cache effects, and page faults. The recorded `repeat` column counts formal timed repeats only.
+
 Output:
 
 ```text

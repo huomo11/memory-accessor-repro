@@ -1,17 +1,35 @@
-build/
-build-mkl/
+# build outputs
+build*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+compile_commands.json
+
+# compiled objects / binaries
 *.o
 *.so
 *.a
 *.out
 *.exe
+
+# Python cache
 __pycache__/
 *.pyc
+
+# OS
 .DS_Store
 
+# logs
+logs/
+*.err
+slurm-*.out
+
+# benchmark latest outputs
 results/*
 !results/.gitkeep
 
+# papers / secrets
 papers/
 *.pdf
 *.key

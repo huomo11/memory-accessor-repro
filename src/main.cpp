@@ -27,6 +27,11 @@ struct Options {
     bool tree_parallel = false;
 };
 
+struct TreeTiming {
+    double time_ms = 0.0;
+    int num_threads = 0;
+};
+
 std::size_t parse_size(const std::string& text, const std::string& name)
 {
     try {
@@ -420,6 +425,7 @@ void run_tree_blocked_mode(const std::string& mode,
                            std::size_t m,
                            std::size_t b,
                            int repeat,
+                           int warmup,
                            int num_systems,
                            std::ofstream& csv)
 {
@@ -431,18 +437,18 @@ void run_tree_blocked_mode(const std::string& mode,
 
     const double flops = static_cast<double>(num_systems) * static_cast<double>(m) * static_cast<double>(m);
 
-    for (int r = 0; r < repeat; ++r) {
+    auto solve_all_systems = [&]() {
         for (auto& system : systems) {
             system.x = system.y;
         }
 
-        int num_threads = 0;
+        TreeTiming timing;
         const auto start = std::chrono::steady_clock::now();
 
 #pragma omp parallel
         {
 #pragma omp single
-            num_threads = omp_get_num_threads();
+            timing.num_threads = omp_get_num_threads();
 
 #pragma omp for schedule(static)
             for (int system_id = 0; system_id < num_systems; ++system_id) {
@@ -454,8 +460,17 @@ void run_tree_blocked_mode(const std::string& mode,
 
         const auto stop = std::chrono::steady_clock::now();
         const std::chrono::duration<double> elapsed = stop - start;
-        const double seconds = elapsed.count();
-        const double time_ms = seconds * 1000.0;
+        timing.time_ms = elapsed.count() * 1000.0;
+        return timing;
+    };
+
+    for (int w = 0; w < warmup; ++w) {
+        (void)solve_all_systems();
+    }
+
+    for (int r = 0; r < repeat; ++r) {
+        const TreeTiming timing = solve_all_systems();
+        const double seconds = timing.time_ms / 1000.0;
         const double gflops = flops / seconds / 1.0e9;
 
         double max_rel_error = 0.0;
@@ -464,7 +479,7 @@ void run_tree_blocked_mode(const std::string& mode,
         }
 
         write_tree_row(csv, mode, MatrixLayout::Tiled, "right", m, b, r,
-                       num_systems, num_threads, time_ms, gflops, max_rel_error);
+                       num_systems, timing.num_threads, timing.time_ms, gflops, max_rel_error);
     }
 }
 
@@ -473,6 +488,7 @@ void run_tree_direct_mode(const std::string& mode,
                           std::size_t m,
                           std::size_t b,
                           int repeat,
+                          int warmup,
                           int num_systems,
                           std::ofstream& csv)
 {
@@ -484,18 +500,18 @@ void run_tree_direct_mode(const std::string& mode,
 
     const double flops = static_cast<double>(num_systems) * static_cast<double>(m) * static_cast<double>(m);
 
-    for (int r = 0; r < repeat; ++r) {
+    auto solve_all_systems = [&]() {
         for (auto& system : systems) {
             system.x = system.y;
         }
 
-        int num_threads = 0;
+        TreeTiming timing;
         const auto start = std::chrono::steady_clock::now();
 
 #pragma omp parallel
         {
 #pragma omp single
-            num_threads = omp_get_num_threads();
+            timing.num_threads = omp_get_num_threads();
 
 #pragma omp for schedule(static)
             for (int system_id = 0; system_id < num_systems; ++system_id) {
@@ -507,8 +523,17 @@ void run_tree_direct_mode(const std::string& mode,
 
         const auto stop = std::chrono::steady_clock::now();
         const std::chrono::duration<double> elapsed = stop - start;
-        const double seconds = elapsed.count();
-        const double time_ms = seconds * 1000.0;
+        timing.time_ms = elapsed.count() * 1000.0;
+        return timing;
+    };
+
+    for (int w = 0; w < warmup; ++w) {
+        (void)solve_all_systems();
+    }
+
+    for (int r = 0; r < repeat; ++r) {
+        const TreeTiming timing = solve_all_systems();
+        const double seconds = timing.time_ms / 1000.0;
         const double gflops = flops / seconds / 1.0e9;
 
         double max_rel_error = 0.0;
@@ -517,14 +542,15 @@ void run_tree_direct_mode(const std::string& mode,
         }
 
         write_tree_row(csv, mode, MatrixLayout::Contiguous, "direct", m, b, r,
-                       num_systems, num_threads, time_ms, gflops, max_rel_error);
+                       num_systems, timing.num_threads, timing.time_ms, gflops, max_rel_error);
     }
 }
 
 void run_tree_parallel(std::size_t m)
 {
     const std::vector<std::size_t> blocks = {16, 32, 64, 128, 256, 512};
-    constexpr int repeat = 5;
+    constexpr int repeat = 10;
+    constexpr int warmup = 2;
     const int num_systems = omp_get_max_threads();
 
     std::ofstream csv("results/ch4_tree_parallel.csv");
@@ -539,20 +565,20 @@ void run_tree_parallel(std::size_t m)
             throw std::invalid_argument("tree-parallel benchmark requires m % b == 0");
         }
 
-        std::cerr << "tree-parallel b=" << b << " mode=fp64\n";
-        run_tree_blocked_mode<double, double>("fp64", m, b, repeat, num_systems, csv);
+        std::cerr << "tree-parallel b=" << b << " mode=fp64 warmup=" << warmup << " repeat=" << repeat << '\n';
+        run_tree_blocked_mode<double, double>("fp64", m, b, repeat, warmup, num_systems, csv);
 
-        std::cerr << "tree-parallel b=" << b << " mode=fp32_fp64\n";
-        run_tree_blocked_mode<float, double>("fp32_fp64", m, b, repeat, num_systems, csv);
+        std::cerr << "tree-parallel b=" << b << " mode=fp32_fp64 warmup=" << warmup << " repeat=" << repeat << '\n';
+        run_tree_blocked_mode<float, double>("fp32_fp64", m, b, repeat, warmup, num_systems, csv);
 
-        std::cerr << "tree-parallel b=" << b << " mode=fp32\n";
-        run_tree_blocked_mode<float, float>("fp32", m, b, repeat, num_systems, csv);
+        std::cerr << "tree-parallel b=" << b << " mode=fp32 warmup=" << warmup << " repeat=" << repeat << '\n';
+        run_tree_blocked_mode<float, float>("fp32", m, b, repeat, warmup, num_systems, csv);
 
-        std::cerr << "tree-parallel b=" << b << " mode=direct_fp64_mkl\n";
-        run_tree_direct_mode<double>("direct_fp64_mkl", m, b, repeat, num_systems, csv);
+        std::cerr << "tree-parallel b=" << b << " mode=direct_fp64_mkl warmup=" << warmup << " repeat=" << repeat << '\n';
+        run_tree_direct_mode<double>("direct_fp64_mkl", m, b, repeat, warmup, num_systems, csv);
 
-        std::cerr << "tree-parallel b=" << b << " mode=direct_fp32_mkl\n";
-        run_tree_direct_mode<float>("direct_fp32_mkl", m, b, repeat, num_systems, csv);
+        std::cerr << "tree-parallel b=" << b << " mode=direct_fp32_mkl warmup=" << warmup << " repeat=" << repeat << '\n';
+        run_tree_direct_mode<float>("direct_fp32_mkl", m, b, repeat, warmup, num_systems, csv);
     }
 }
 

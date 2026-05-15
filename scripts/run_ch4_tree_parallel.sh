@@ -11,6 +11,8 @@ fi
 export OMP_NUM_THREADS
 export MKL_DYNAMIC=FALSE
 
+# The executable performs unrecorded warmup solves for each mode/block size
+# before writing timed repeats, reducing first-call/cache/page-fault outliers.
 mkdir -p results
 
 if [[ ! -x build-mkl/blocked_trsv_benchmark ]]; then
