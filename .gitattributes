@@ -8,9 +8,9 @@
 *.h text eol=lf
 CMakeLists.txt text eol=lf
 *.md text eol=lf
+*.csv text eol=lf
 
 *.png binary
 *.jpg binary
 *.jpeg binary
 *.pdf binary
-*.csv text eol=lf

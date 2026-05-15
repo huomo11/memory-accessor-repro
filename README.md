@@ -112,9 +112,43 @@ Tree parallel / Tiled matrix / Column-major / Right-looking
 
 It shows the three blocked precision modes as solid curves and the two direct MKL baselines as horizontal dashed lines.
 
+## Eight-Panel Extension
+
+Two maintained entry points are available:
+
+1. Single-plot main path: tree-parallel, tiled matrix, column-major, right-looking.
+2. Eight-panel extension: systematic Chapter 4 comparison over matrix layout, data layout, and looking direction.
+
+Run the eight-panel benchmark:
+
+```bash
+bash scripts/run_ch4_eight_panels.sh
+python3 scripts/plot_ch4_8panels.py
+```
+
+Outputs:
+
+```text
+results/ch4_8panels.csv
+results/ch4_8panels.png
+```
+
+The eight panels are:
+
+- tiled + col_major + right
+- tiled + col_major + left
+- tiled + row_major + right
+- tiled + row_major + left
+- contiguous + col_major + right
+- contiguous + col_major + left
+- contiguous + row_major + right
+- contiguous + row_major + left
+
+The direct MKL baselines remain full contiguous triangular solves. Their `b` value is only a plotting/grouping label and does not change the direct solve. For final report-quality numbers, prefer running this path under the same 20-core single-socket bind setup to reduce NUMA interference.
+
 ## Legacy Paths
 
-The maintained path is the Chapter 4 tree-parallel benchmark. Older single-thread 8-panel and diagnostic harness code has been removed from the active source; it can be recovered from Git history if needed. The recommended entry points are:
+The maintained main path is the Chapter 4 tree-parallel benchmark. Older single-thread diagnostics have been removed from the active source; they can be recovered from Git history if needed. The recommended single-panel entry points are:
 
 ```bash
 bash scripts/run_ch4_tree_parallel.sh
@@ -129,7 +163,4 @@ Current non-goals:
 - MUMPS
 - MPI
 - non-divisible blocks
-- left-looking
-- row-major
-- contiguous blocked variants
-- 8-panel figure generation as the main output
+- custom benchmark framework
