@@ -45,7 +45,10 @@ def main() -> int:
     df["b"] = pd.to_numeric(df["b"])
     df["gflops"] = pd.to_numeric(df["gflops"])
 
-    plt.style.use("seaborn-v0_8-whitegrid")
+    try:
+        plt.style.use("seaborn-v0_8-whitegrid")
+    except OSError:
+        plt.style.use("ggplot")
     fig, ax = plt.subplots(figsize=(7.6, 5.0))
 
     for mode, label, color in CURVES:
