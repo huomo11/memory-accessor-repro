@@ -188,7 +188,7 @@ topology: 2 sockets x 20 cores
 构建使用远程 MKL runtime：
 
 ```text
-/opt/conda/lib/libmkl_rt.so.2
+/opt/app/anaconda3/lib/libmkl_rt.so.2
 ```
 
 运行时建议：

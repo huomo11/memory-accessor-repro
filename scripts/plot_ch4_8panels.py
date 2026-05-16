@@ -61,17 +61,11 @@ def plot_blocked_curve(ax, df, matrix_layout, data_layout, looking, mode, label,
     )
 
 
-def plot_direct_baseline(ax, df, data_layout, mode, label, color):
-    sub = df[
-        (df["mode"] == mode)
-        & (df["matrix_layout"] == "contiguous")
-        & (df["data_layout"] == data_layout)
-        & (df["looking"] == "direct")
-    ]
-    if sub.empty:
+def plot_direct_baseline(ax, value, label, color):
+    if value is None:
         return
     ax.axhline(
-        sub["gflops"].median(),
+        value,
         linewidth=1.4,
         linestyle="--",
         color=color,
@@ -100,6 +94,11 @@ def main() -> int:
     except OSError:
         plt.style.use("ggplot")
 
+    baseline_values = {}
+    for mode, _, _ in BASELINES:
+        sub = df[df["mode"] == mode]
+        baseline_values[mode] = None if sub.empty else sub["gflops"].median()
+
     fig, axes = plt.subplots(2, 4, figsize=(16.0, 7.5), sharex=True)
     axes = axes.ravel()
 
@@ -107,7 +106,7 @@ def main() -> int:
         for mode, label, color in CURVES:
             plot_blocked_curve(ax, df, matrix_layout, data_layout, looking, mode, label, color)
         for mode, label, color in BASELINES:
-            plot_direct_baseline(ax, df, data_layout, mode, label, color)
+            plot_direct_baseline(ax, baseline_values[mode], label, color)
 
         ax.set_title(title, fontsize=10)
         ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.45)

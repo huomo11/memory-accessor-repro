@@ -41,7 +41,7 @@ Direct MKL baselines:
 - `direct_fp64_mkl`: full contiguous double triangular solve, one `cblas_dtrsv` per system
 - `direct_fp32_mkl`: full contiguous float triangular solve, one `cblas_strsv` per system
 
-For direct MKL baselines, `b` is only a plotting/grouping label; the direct solve itself does not use block size.
+For direct MKL baselines, `b` is only a plotting/grouping label; the direct solve itself does not use block size. Direct MKL references in the 8-panel plot use global medians because they do not depend on panel-specific blocked layout settings.
 
 ## Build
 

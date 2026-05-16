@@ -12,25 +12,9 @@
 
 set -eo pipefail
 
-export COLORTERM="${COLORTERM:-}"
-source /etc/profile || true
-module load gcc/10.1.0
-
-export PATH=$HOME/.local/bin:/opt/app/anaconda3/bin:$PATH
-export LD_LIBRARY_PATH=/opt/app/anaconda3/lib:${LD_LIBRARY_PATH:-}
-
-export MKL_NUM_THREADS=1
-export MKL_DYNAMIC=FALSE
-export MKL_THREADING_LAYER=GNU
-
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-20}"
-export OMP_DYNAMIC=FALSE
-export OMP_PLACES=cores
-export OMP_PROC_BIND=close
-
-export MPLBACKEND=Agg
-export MPLCONFIGDIR=$HOME/.cache/matplotlib
-mkdir -p "$MPLCONFIGDIR"
+cd ~/workspace/memory-accessor-repro
+mkdir -p logs results
+source scripts/env_bupt.sh
 
 echo "===== Job info ====="
 date
@@ -46,18 +30,7 @@ echo "MKL_THREADING_LAYER=$MKL_THREADING_LAYER"
 echo "LD_LIBRARY_PATH=$LD_LIBRARY_PATH"
 echo
 
-cd ~/workspace/memory-accessor-repro
-
-echo "===== Configure ====="
-rm -rf build-mkl
-cmake -S . -B build-mkl \
-  -DCMAKE_BUILD_TYPE=Release \
-  -DMKL_ROOT=/opt/app/anaconda3 \
-  -DCBLAS_INCLUDE_DIR=$PWD/third_party/cblas_compat
-
-echo
-echo "===== Build ====="
-cmake --build build-mkl -j "$OMP_NUM_THREADS"
+bash scripts/build_mkl_bupt.sh
 
 echo
 echo "===== Link check ====="
