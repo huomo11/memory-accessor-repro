@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import argparse
 from pathlib import Path
 import sys
 
@@ -14,8 +15,8 @@ except ImportError as exc:
 
 
 ROOT = Path(__file__).resolve().parents[1]
-CSV_PATH = ROOT / "results" / "ch4_8panels.csv"
-OUT_PATH = ROOT / "results" / "ch4_8panels.png"
+DEFAULT_CSV_PATH = ROOT / "results" / "ch4_8panels.csv"
+DEFAULT_OUT_PATH = ROOT / "results" / "ch4_8panels.png"
 
 PANELS = [
     ("tiled", "col_major", "right", "Tiled / Column-major / Right-looking"),
@@ -40,7 +41,14 @@ BASELINES = [
 ]
 
 
-def plot_blocked_curve(ax, df, matrix_layout, data_layout, looking, mode, label, color):
+def parse_args():
+    parser = argparse.ArgumentParser(description="Plot Chapter 4 eight-panel benchmark results.")
+    parser.add_argument("--input", default=str(DEFAULT_CSV_PATH), help="input CSV path")
+    parser.add_argument("--output", default=str(DEFAULT_OUT_PATH), help="output PNG path")
+    return parser.parse_args()
+
+
+def blocked_medians(df, matrix_layout, data_layout, looking, mode):
     sub = df[
         (df["mode"] == mode)
         & (df["matrix_layout"] == matrix_layout)
@@ -48,8 +56,13 @@ def plot_blocked_curve(ax, df, matrix_layout, data_layout, looking, mode, label,
         & (df["looking"] == looking)
     ]
     if sub.empty:
+        return sub
+    return sub.groupby("b", as_index=False)["gflops"].median().sort_values("b")
+
+
+def plot_blocked_curve(ax, med, label, color):
+    if med.empty:
         return
-    med = sub.groupby("b", as_index=False)["gflops"].median().sort_values("b")
     ax.plot(
         med["b"],
         med["gflops"],
@@ -59,6 +72,26 @@ def plot_blocked_curve(ax, df, matrix_layout, data_layout, looking, mode, label,
         color=color,
         label=label,
     )
+
+
+def compute_y_limits(panel_medians, baseline_values):
+    values = []
+    for med in panel_medians.values():
+        if not med.empty:
+            values.extend(med["gflops"].tolist())
+    values.extend(value for value in baseline_values.values() if value is not None)
+
+    if not values:
+        return None
+
+    ymin = min(values)
+    ymax = max(values)
+    span = ymax - ymin
+    if span <= 0:
+        padding = max(abs(ymax) * 0.05, 1.0)
+    else:
+        padding = span * 0.05
+    return max(0.0, ymin - padding), ymax + padding
 
 
 def plot_direct_baseline(ax, value, label, color):
@@ -74,12 +107,16 @@ def plot_direct_baseline(ax, value, label, color):
 
 
 def main() -> int:
-    if not CSV_PATH.exists():
-        print(f"error: CSV not found: {CSV_PATH}", file=sys.stderr)
+    args = parse_args()
+    csv_path = Path(args.input)
+    out_path = Path(args.output)
+
+    if not csv_path.exists():
+        print(f"error: CSV not found: {csv_path}", file=sys.stderr)
         print("run scripts/run_ch4_eight_panels.sh first", file=sys.stderr)
         return 1
 
-    df = pd.read_csv(CSV_PATH)
+    df = pd.read_csv(csv_path)
     required = {"mode", "b", "repeat", "gflops", "matrix_layout", "data_layout", "looking"}
     missing = required.difference(df.columns)
     if missing:
@@ -99,15 +136,27 @@ def main() -> int:
         sub = df[df["mode"] == mode]
         baseline_values[mode] = None if sub.empty else sub["gflops"].median()
 
-    fig, axes = plt.subplots(2, 4, figsize=(16.0, 7.5), sharex=True)
+    panel_medians = {}
+    for matrix_layout, data_layout, looking, _ in PANELS:
+        for mode, _, _ in CURVES:
+            panel_medians[(matrix_layout, data_layout, looking, mode)] = blocked_medians(
+                df, matrix_layout, data_layout, looking, mode
+            )
+
+    y_limits = compute_y_limits(panel_medians, baseline_values)
+
+    fig, axes = plt.subplots(2, 4, figsize=(16.0, 7.5), sharex=True, sharey=True)
     axes = axes.ravel()
 
     for ax, (matrix_layout, data_layout, looking, title) in zip(axes, PANELS):
         for mode, label, color in CURVES:
-            plot_blocked_curve(ax, df, matrix_layout, data_layout, looking, mode, label, color)
+            med = panel_medians[(matrix_layout, data_layout, looking, mode)]
+            plot_blocked_curve(ax, med, label, color)
         for mode, label, color in BASELINES:
             plot_direct_baseline(ax, baseline_values[mode], label, color)
 
+        if y_limits is not None:
+            ax.set_ylim(*y_limits)
         ax.set_title(title, fontsize=10)
         ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.45)
         ax.set_axisbelow(True)
@@ -122,9 +171,9 @@ def main() -> int:
     fig.suptitle("Chapter 4 Eight-Panel Tree-Parallel Comparison", y=1.06, fontsize=13)
     fig.tight_layout()
 
-    OUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(OUT_PATH, dpi=200, bbox_inches="tight")
-    print(f"wrote {OUT_PATH}")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=200, bbox_inches="tight")
+    print(f"wrote {out_path}")
     return 0
 
 
