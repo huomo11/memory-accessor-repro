@@ -22,7 +22,7 @@ struct Options {
     std::size_t m = 4096;
     int repeat = 5;
     int warmup = 0;
-    std::string output = "results/ch4_tree_parallel.csv";
+    std::string output = "results/ch4_tree_parallel.Dcsv";
     std::vector<std::size_t> blocks = {16, 32, 64, 128, 256, 512};
     bool tree_parallel = false;
     bool eight_panels = false;
