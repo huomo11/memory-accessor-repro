@@ -26,10 +26,16 @@ struct Blas<float> {
                     static_cast<int>(n), a, static_cast<int>(lda), x, 1);
     }
 
-    static void gemv(CBLAS_LAYOUT layout, std::size_t n, const float* a, std::size_t lda, const float* x, float* y)
+    static void gemv(CBLAS_LAYOUT layout,
+                     std::size_t rows,
+                     std::size_t cols,
+                     const float* a,
+                     std::size_t lda,
+                     const float* x,
+                     float* y)
     {
         cblas_sgemv(layout, CblasNoTrans,
-                    static_cast<int>(n), static_cast<int>(n),
+                    static_cast<int>(rows), static_cast<int>(cols),
                     -1.0f, a, static_cast<int>(lda), x, 1, 1.0f, y, 1);
     }
 };
@@ -42,10 +48,16 @@ struct Blas<double> {
                     static_cast<int>(n), a, static_cast<int>(lda), x, 1);
     }
 
-    static void gemv(CBLAS_LAYOUT layout, std::size_t n, const double* a, std::size_t lda, const double* x, double* y)
+    static void gemv(CBLAS_LAYOUT layout,
+                     std::size_t rows,
+                     std::size_t cols,
+                     const double* a,
+                     std::size_t lda,
+                     const double* x,
+                     double* y)
     {
         cblas_dgemv(layout, CblasNoTrans,
-                    static_cast<int>(n), static_cast<int>(n),
+                    static_cast<int>(rows), static_cast<int>(cols),
                     -1.0, a, static_cast<int>(lda), x, 1, 1.0, y, 1);
     }
 };
@@ -64,19 +76,24 @@ struct BreakdownStats {
 };
 
 template <typename Storage, typename Compute>
-void copy_compact_block_as_compute(const Storage* src, Compute* dst, std::size_t b, DataLayout layout)
+void copy_compact_block_as_compute(const Storage* src,
+                                   Compute* dst,
+                                   std::size_t rows,
+                                   std::size_t cols,
+                                   std::size_t ld,
+                                   DataLayout layout)
 {
     if (layout == DataLayout::RowMajor) {
-        for (std::size_t row = 0; row < b; ++row) {
-            for (std::size_t col = 0; col < b; ++col) {
-                const std::size_t k = row * b + col;
+        for (std::size_t row = 0; row < rows; ++row) {
+            for (std::size_t col = 0; col < cols; ++col) {
+                const std::size_t k = row * ld + col;
                 dst[k] = static_cast<Compute>(src[k]);
             }
         }
     } else {
-        for (std::size_t col = 0; col < b; ++col) {
-            for (std::size_t row = 0; row < b; ++row) {
-                const std::size_t k = col * b + row;
+        for (std::size_t col = 0; col < cols; ++col) {
+            for (std::size_t row = 0; row < rows; ++row) {
+                const std::size_t k = col * ld + row;
                 dst[k] = static_cast<Compute>(src[k]);
             }
         }
@@ -87,24 +104,26 @@ template <typename Storage, typename Compute>
 void copy_contiguous_block_as_compute(const Storage* src,
                                       Compute* dst,
                                       std::size_t m,
-                                      std::size_t b,
+                                      std::size_t workspace_ld,
+                                      std::size_t rows,
+                                      std::size_t cols,
                                       std::size_t row0,
                                       std::size_t col0,
                                       DataLayout layout)
 {
     if (layout == DataLayout::RowMajor) {
-        for (std::size_t row = 0; row < b; ++row) {
+        for (std::size_t row = 0; row < rows; ++row) {
             const Storage* src_row = src + (row0 + row) * m + col0;
-            Compute* dst_row = dst + row * b;
-            for (std::size_t col = 0; col < b; ++col) {
+            Compute* dst_row = dst + row * workspace_ld;
+            for (std::size_t col = 0; col < cols; ++col) {
                 dst_row[col] = static_cast<Compute>(src_row[col]);
             }
         }
     } else {
-        for (std::size_t col = 0; col < b; ++col) {
+        for (std::size_t col = 0; col < cols; ++col) {
             const Storage* src_col = src + (col0 + col) * m + row0;
-            Compute* dst_col = dst + col * b;
-            for (std::size_t row = 0; row < b; ++row) {
+            Compute* dst_col = dst + col * workspace_ld;
+            for (std::size_t row = 0; row < rows; ++row) {
                 dst_col[row] = static_cast<Compute>(src_col[row]);
             }
         }
@@ -117,14 +136,14 @@ BlasOperand<Compute> prepare_block_for_blas(const TiledUpperMatrix<Storage>& u,
                                             std::size_t tile_j,
                                             std::vector<Compute>& workspace)
 {
-    const std::size_t b = u.b();
+    const std::size_t rows = u.block_extent(tile_i);
+    const std::size_t cols = u.block_extent(tile_j);
+    const std::size_t ld = u.tile_ld();
     if constexpr (std::is_same_v<Storage, Compute>) {
-        // Uniform precision tiled blocks are already compact b x b BLAS operands.
-        return {u.tile(tile_i, tile_j), b};
+        return {u.tile(tile_i, tile_j), ld};
     } else {
-        // Mixed precision block memory accessor: storage tile -> compute workspace.
-        copy_compact_block_as_compute(u.tile(tile_i, tile_j), workspace.data(), b, u.data_layout());
-        return {workspace.data(), b};
+        copy_compact_block_as_compute(u.tile(tile_i, tile_j), workspace.data(), rows, cols, ld, u.data_layout());
+        return {workspace.data(), ld};
     }
 }
 
@@ -135,16 +154,18 @@ BlasOperand<Compute> prepare_block_for_blas(const ContiguousUpperMatrix<Storage>
                                             std::vector<Compute>& workspace)
 {
     const std::size_t m = u.m();
-    const std::size_t b = u.b();
-    const std::size_t row0 = tile_i * b;
-    const std::size_t col0 = tile_j * b;
+    const std::size_t workspace_ld = u.b();
+    const std::size_t rows = u.block_extent(tile_i);
+    const std::size_t cols = u.block_extent(tile_j);
+    const std::size_t row0 = u.block_begin(tile_i);
+    const std::size_t col0 = u.block_begin(tile_j);
 
     if constexpr (std::is_same_v<Storage, Compute>) {
         const std::size_t offset = dense_index(row0, col0, m, u.data_layout());
         return {u.data() + offset, m};
     } else {
-        copy_contiguous_block_as_compute(u.data(), workspace.data(), m, b, row0, col0, u.data_layout());
-        return {workspace.data(), b};
+        copy_contiguous_block_as_compute(u.data(), workspace.data(), m, workspace_ld, rows, cols, row0, col0, u.data_layout());
+        return {workspace.data(), workspace_ld};
     }
 }
 
@@ -153,7 +174,7 @@ void blocked_trsv_right_looking(const Matrix& u, std::vector<Compute>& x)
 {
     const std::size_t m = u.m();
     const std::size_t b = u.b();
-    const std::size_t p = u.p();
+    const std::size_t p = u.num_blocks();
 
     if (x.size() != m) {
         throw std::invalid_argument("x size must match matrix size m");
@@ -163,12 +184,16 @@ void blocked_trsv_right_looking(const Matrix& u, std::vector<Compute>& x)
     const CBLAS_LAYOUT layout = cblas_layout(u.data_layout());
 
     for (std::size_t j = p; j-- > 0;) {
+        const std::size_t j0 = u.block_begin(j);
+        const std::size_t bj = u.block_extent(j);
         const BlasOperand<Compute> diag = prepare_block_for_blas(u, j, j, workspace);
-        Blas<Compute>::trsv(layout, b, diag.data, diag.lda, x.data() + j * b);
+        Blas<Compute>::trsv(layout, bj, diag.data, diag.lda, x.data() + j0);
 
         for (std::size_t i = j; i-- > 0;) {
+            const std::size_t i0 = u.block_begin(i);
+            const std::size_t bi = u.block_extent(i);
             const BlasOperand<Compute> block = prepare_block_for_blas(u, i, j, workspace);
-            Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
+            Blas<Compute>::gemv(layout, bi, bj, block.data, block.lda, x.data() + j0, x.data() + i0);
         }
     }
 }
@@ -178,7 +203,7 @@ BreakdownStats blocked_trsv_right_looking_breakdown(const Matrix& u, std::vector
 {
     const std::size_t m = u.m();
     const std::size_t b = u.b();
-    const std::size_t p = u.p();
+    const std::size_t p = u.num_blocks();
 
     if (x.size() != m) {
         throw std::invalid_argument("x size must match matrix size m");
@@ -195,24 +220,28 @@ BreakdownStats blocked_trsv_right_looking_breakdown(const Matrix& u, std::vector
     const auto total_start = std::chrono::steady_clock::now();
 
     for (std::size_t j = p; j-- > 0;) {
+        const std::size_t j0 = u.block_begin(j);
+        const std::size_t bj = u.block_extent(j);
         const auto prepare_start = std::chrono::steady_clock::now();
         const BlasOperand<Compute> diag = prepare_block_for_blas(u, j, j, workspace);
         const auto prepare_stop = std::chrono::steady_clock::now();
         stats.prepare_ms += elapsed_ms(prepare_start, prepare_stop);
 
         const auto trsv_start = std::chrono::steady_clock::now();
-        Blas<Compute>::trsv(layout, b, diag.data, diag.lda, x.data() + j * b);
+        Blas<Compute>::trsv(layout, bj, diag.data, diag.lda, x.data() + j0);
         const auto trsv_stop = std::chrono::steady_clock::now();
         stats.trsv_ms += elapsed_ms(trsv_start, trsv_stop);
 
         for (std::size_t i = j; i-- > 0;) {
+            const std::size_t i0 = u.block_begin(i);
+            const std::size_t bi = u.block_extent(i);
             const auto block_prepare_start = std::chrono::steady_clock::now();
             const BlasOperand<Compute> block = prepare_block_for_blas(u, i, j, workspace);
             const auto block_prepare_stop = std::chrono::steady_clock::now();
             stats.prepare_ms += elapsed_ms(block_prepare_start, block_prepare_stop);
 
             const auto gemv_start = std::chrono::steady_clock::now();
-            Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
+            Blas<Compute>::gemv(layout, bi, bj, block.data, block.lda, x.data() + j0, x.data() + i0);
             const auto gemv_stop = std::chrono::steady_clock::now();
             stats.gemv_ms += elapsed_ms(gemv_start, gemv_stop);
         }
@@ -228,7 +257,7 @@ void blocked_trsv_left_looking(const Matrix& u, std::vector<Compute>& x)
 {
     const std::size_t m = u.m();
     const std::size_t b = u.b();
-    const std::size_t p = u.p();
+    const std::size_t p = u.num_blocks();
 
     if (x.size() != m) {
         throw std::invalid_argument("x size must match matrix size m");
@@ -238,13 +267,17 @@ void blocked_trsv_left_looking(const Matrix& u, std::vector<Compute>& x)
     const CBLAS_LAYOUT layout = cblas_layout(u.data_layout());
 
     for (std::size_t i = p; i-- > 0;) {
+        const std::size_t i0 = u.block_begin(i);
+        const std::size_t bi = u.block_extent(i);
         for (std::size_t j = p; j-- > i + 1;) {
+            const std::size_t j0 = u.block_begin(j);
+            const std::size_t bj = u.block_extent(j);
             const BlasOperand<Compute> block = prepare_block_for_blas(u, i, j, workspace);
-            Blas<Compute>::gemv(layout, b, block.data, block.lda, x.data() + j * b, x.data() + i * b);
+            Blas<Compute>::gemv(layout, bi, bj, block.data, block.lda, x.data() + j0, x.data() + i0);
         }
 
         const BlasOperand<Compute> diag = prepare_block_for_blas(u, i, i, workspace);
-        Blas<Compute>::trsv(layout, b, diag.data, diag.lda, x.data() + i * b);
+        Blas<Compute>::trsv(layout, bi, diag.data, diag.lda, x.data() + i0);
     }
 }
 

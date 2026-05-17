@@ -57,7 +57,7 @@ direct MKL baseline 在图中用于提供参考位置。它不是 blocked algori
 U x = y
 ```
 
-其中 `U` 是 dense upper triangular matrix，`m = 4096`。blocked benchmark 要求 `m % b == 0`。
+其中 `U` 是 dense upper triangular matrix，`m = 4096`。早期版本要求 `m % b == 0`；当前版本已经支持 tail block，因此 `b` 不再必须整除 `m`。
 
 tree-parallel 设置：
 
@@ -112,6 +112,24 @@ gflops = num_systems * m * m / time_seconds / 1e9
 ```
 
 ## 4. Precision Modes
+
+### Support for non-divisor block sizes
+
+论文 Algorithm 2 为了表达简洁，通常写成 `m = p * b`。当前实现已经放宽这个假设：`b` 是 nominal block size，真实 block 数为 `ceil(m / b)`，最后一个 tail block 的实际大小为：
+
+```text
+block_extent(k) = min(b, m - k*b)
+```
+
+CSV 中的 `b` 仍记录用户传入的 nominal block size。对于 tiled matrix，底层仍为每个 tile 分配 padded `b x b` 存储，tile 的 leading dimension 保持为 `b`；对于最后不足 `b` 的 block，BLAS 的 `n/M/N` 使用实际 block extent，`lda` 使用底层存储 leading dimension。padding 区域保留为 0，不作为真实矩阵元素参与计算。
+
+这个设计可以支持更密集的 block-size scan，例如：
+
+```text
+16, 32, 48, 64, ..., 496, 512
+```
+
+目的只是让 qualitative reproduction 的横轴采样更接近 Figure 4.1，不表示已经完全复现论文原图。
 
 `fp64`：
 

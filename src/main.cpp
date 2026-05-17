@@ -22,7 +22,7 @@ struct Options {
     std::size_t m = 4096;
     int repeat = 5;
     int warmup = 0;
-    std::string output = "results/ch4_tree_parallel.Dcsv";
+    std::string output;
     std::vector<std::size_t> blocks = {16, 32, 64, 128, 256, 512};
     bool tree_parallel = false;
     bool eight_panels = false;
@@ -121,13 +121,26 @@ Options parse_options(int argc, char** argv)
         } else if (arg == "--eight-panels") {
             opt.eight_panels = true;
         } else if (arg == "--help" || arg == "-h") {
-            std::cout << "Usage: blocked_trsv_benchmark --tree-parallel | --eight-panels\n"
-                         "Options: [--m 4096] [--b 16,32,64] [--repeat 10] [--warmup 2] "
-                         "[--output results/ch4_tree_parallel.csv]\n";
+            std::cout << "Usage:\n"
+             "  blocked_trsv_benchmark (--tree-parallel | --eight-panels) --output FILE\n\n"
+             "Options:\n"
+             "  --m N                 Matrix size, default 4096\n"
+             "  --b LIST              Nominal block sizes; they do not need to divide m\n"
+             "  --repeat N            Timed repetitions, default 5\n"
+             "  --warmup N            Warmup repetitions, default 0\n"
+             "  --output FILE         Output CSV path, required\n";
             std::exit(0);
         } else {
             throw std::invalid_argument("unknown argument: " + arg);
         }
+    }
+
+    if (opt.tree_parallel == opt.eight_panels) {
+        throw std::invalid_argument("select exactly one benchmark mode: --tree-parallel or --eight-panels");
+    }
+
+    if (opt.output.empty()) {
+        throw std::invalid_argument("--output is required");
     }
     return opt;
 }
@@ -346,8 +359,11 @@ void validate_tree_options(std::size_t m, const std::vector<std::size_t>& blocks
         throw std::invalid_argument("tree-parallel block list must not be empty");
     }
     for (const std::size_t b : blocks) {
-        if (m % b != 0) {
-            throw std::invalid_argument("tree-parallel benchmark requires m % b == 0; got m="
+        if (b == 0) {
+            throw std::invalid_argument("tree-parallel block sizes must be positive");
+        }
+        if (b > m) {
+            throw std::invalid_argument("tree-parallel benchmark requires b <= m; got m="
                                         + std::to_string(m) + ", b=" + std::to_string(b));
         }
     }

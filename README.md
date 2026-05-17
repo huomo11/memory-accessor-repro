@@ -88,6 +88,15 @@ results/ch4_8panels.csv
 results/ch4_8panels.png
 ```
 
+Dense block-size scan with non-divisor block sizes:
+
+```bash
+bash scripts/run_ch4_8panels_dense_bscan.sh
+python3 scripts/plot_ch4_8panels.py \
+  --input results/ch4_8panels_dense_bscan.csv \
+  --output results/ch4_8panels_dense_bscan.png
+```
+
 The scripts use:
 
 ```bash
@@ -131,6 +140,12 @@ repeat = 10
 
 Warmup rows are not written to CSV. The `repeat` column records formal timed repeats only.
 
+## Support for Non-Divisor Block Sizes
+
+The benchmark supports nominal block sizes `b` that do not divide `m`. Internally, the number of blocks is `ceil(m / b)`, and the last block uses `min(b, m - k*b)` as its actual extent. Tiled storage still allocates padded `b x b` tiles so BLAS leading dimensions stay simple; BLAS `M/N/n` arguments use the logical block extent.
+
+The CSV `b` column records the nominal block size requested by the user. This makes denser block-size scans possible, closer to the sampling style of Figure 4.1, without claiming an exact reproduction of the paper's plot.
+
 ## Current Reference Results
 
 Existing report artifacts include:
@@ -151,5 +166,4 @@ The current main result is the 20-core single-socket bind result on the BUPT CPU
 - BLR
 - MUMPS
 - MPI
-- non-divisible blocks
 - production benchmark framework
